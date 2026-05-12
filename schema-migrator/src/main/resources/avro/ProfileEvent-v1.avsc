@@ -1,0 +1,20 @@
+{
+  "type": "record",
+  "name": "ProfileEvent",
+  "namespace": "com.myfabric.events",
+  "doc": "v1 - baseline profile event schema",
+  "fields": [
+    {"name": "eventId",      "type": "string"},
+    {"name": "profileId",    "type": "string"},
+    {"name": "eventType",    "type": {
+      "type": "enum",
+      "name": "EventType",
+      "symbols": ["CREATED", "UPDATED", "DELETED"]
+    }},
+    {"name": "timestamp",    "type": "long",   "logicalType": "timestamp-millis"},
+    {"name": "firstName",    "type": "string"},
+    {"name": "lastName",     "type": "string"},
+    {"name": "email",        "type": "string"},
+    {"name": "schemaVersion","type": "int",    "default": 1}
+  ]
+}

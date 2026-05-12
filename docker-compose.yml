@@ -1,0 +1,234 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────
+#  my-fabric  |  local development stack
+#
+#  Kafka runs in KRaft mode (no ZooKeeper) — requires CP 7.4+.
+#  The CLUSTER_ID is a stable base64-encoded UUID; regenerate with:
+#    docker run --rm confluentinc/cp-kafka:8.2.0 kafka-storage random-uuid
+#
+#  Services:
+#    Infrastructure:   kafka (KRaft), schema-registry, mongodb
+#    UI:               kafka-ui (:8090), mongo-express (:8091)
+#    App:              profile-api (:8080), profile-consumer (internal),
+#                      dlq-consumer (internal), schema-migrator (:8083)
+#
+#  Key demo URLs:
+#    Kafka UI        → http://localhost:8090
+#    Mongo Express   → http://localhost:8091
+#    Profile API     → http://localhost:8080
+#    Schema Migrator → http://localhost:8083
+# ─────────────────────────────────────────────────────────────
+
+networks:
+  fabric-net:
+    driver: bridge
+
+volumes:
+  kafka-data:
+  mongo-data:
+
+services:
+
+  # ── Kafka (KRaft — combined broker + controller, no ZooKeeper) ─
+  kafka:
+    image: confluentinc/cp-kafka:8.2.0
+    hostname: kafka
+    container_name: fabric-kafka
+    networks: [fabric-net]
+    ports:
+      - "9092:9092"    # external — used by host-side tools and apps
+      - "9093:9093"    # internal — container-to-container
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      # Three listener names: EXTERNAL (host), INTERNAL (containers), CONTROLLER (KRaft)
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: EXTERNAL://0.0.0.0:9092,INTERNAL://0.0.0.0:9093,CONTROLLER://0.0.0.0:29093
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Stable cluster ID — must be base64-encoded UUID (22 chars)
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 3000
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ── Schema Registry ───────────────────────────────────────────
+  schema-registry:
+    image: confluentinc/cp-schema-registry:8.2.0
+    hostname: schema-registry
+    container_name: fabric-schema-registry
+    networks: [fabric-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      # KRaft: point directly at the broker; no ZooKeeper URL needed
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9093
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+
+  # ── Topic initialiser (runs once, exits) ──────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:8.2.0
+    container_name: fabric-kafka-init
+    networks: [fabric-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating topics..."
+        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+          --topic profile.events --partitions 6 --replication-factor 1 \
+          --config retention.ms=86400000
+        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+          --topic profile.events-retry-0 --partitions 6 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+          --topic profile.events-retry-1 --partitions 6 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+          --topic profile.events.dlq --partitions 3 --replication-factor 1 \
+          --config retention.ms=604800000
+        echo "Topics created:"
+        kafka-topics --bootstrap-server kafka:9093 --list
+
+  # ── Kafka UI ──────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: fabric-kafka-ui
+    networks: [fabric-net]
+    depends_on: [kafka, schema-registry]
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: fabric-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      KAFKA_CLUSTERS_0_METRICS_PORT: 9997
+      DYNAMIC_CONFIG_ENABLED: "true"
+
+  # ── MongoDB ───────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: fabric-mongodb
+    networks: [fabric-net]
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: fabric
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Mongo Express ─────────────────────────────────────────────
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: fabric-mongo-express
+    networks: [fabric-net]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "8091:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+
+  # ── profile-api ───────────────────────────────────────────────
+  profile-api:
+    build:
+      context: ./profile-api
+      dockerfile: Dockerfile
+    container_name: fabric-profile-api
+    networks: [fabric-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      MONGODB_URI: mongodb://mongodb:27017/fabric
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── profile-consumer ──────────────────────────────────────────
+  #   Scale with: docker compose up --scale profile-consumer=3
+  #   This triggers a Kafka rebalance — watch the logs.
+  profile-consumer:
+    build:
+      context: ./profile-consumer
+      dockerfile: Dockerfile
+    container_name: fabric-profile-consumer
+    networks: [fabric-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      MONGODB_URI: mongodb://mongodb:27017/fabric
+      CONSUMER_GROUP_ID: profile-consumer-group
+      # Uncomment to simulate consumer lag:
+      # SIMULATE_SLOW_MS: 500
+
+  # ── dlq-consumer ──────────────────────────────────────────────
+  dlq-consumer:
+    build:
+      context: ./dlq-consumer
+      dockerfile: Dockerfile
+    container_name: fabric-dlq-consumer
+    networks: [fabric-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      MONGODB_URI: mongodb://mongodb:27017/fabric
+      CONSUMER_GROUP_ID: dlq-consumer-group
+
+  # ── schema-migrator ───────────────────────────────────────────
+  schema-migrator:
+    build:
+      context: ./schema-migrator
+      dockerfile: Dockerfile
+    container_name: fabric-schema-migrator
+    networks: [fabric-net]
+    depends_on: [schema-registry]
+    ports:
+      - "8083:8083"
+    environment:
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081

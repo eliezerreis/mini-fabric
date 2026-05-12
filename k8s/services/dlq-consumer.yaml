@@ -1,0 +1,25 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dlq-consumer
+  namespace: my-fabric
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dlq-consumer
+  template:
+    metadata:
+      labels:
+        app: dlq-consumer
+    spec:
+      containers:
+        - name: dlq-consumer
+          image: myfabric/dlq-consumer:latest
+          envFrom:
+            - configMapRef:
+                name: fabric-config
+          env:
+            - name: CONSUMER_GROUP_ID
+              value: dlq-consumer-group

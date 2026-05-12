@@ -1,0 +1,34 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: profile-consumer
+  namespace: my-fabric
+  annotations:
+    # Scale with: kubectl scale deployment profile-consumer --replicas=3 -n my-fabric
+    # This triggers a Kafka rebalance — watch logs for REVOKED/ASSIGNED messages
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: profile-consumer
+  template:
+    metadata:
+      labels:
+        app: profile-consumer
+    spec:
+      containers:
+        - name: profile-consumer
+          image: myfabric/profile-consumer:latest
+          envFrom:
+            - configMapRef:
+                name: fabric-config
+          env:
+            - name: SIMULATE_SLOW_MS
+              value: "0"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10

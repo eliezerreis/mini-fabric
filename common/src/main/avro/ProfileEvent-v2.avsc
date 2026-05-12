@@ -1,0 +1,25 @@
+{
+  "type": "record",
+  "name": "ProfileEvent",
+  "namespace": "com.myfabric.events",
+  "doc": "v2 - backward-compatible evolution: adds phoneNumber, department, metadata; new MERGED event type via aliases",
+  "fields": [
+    {"name": "eventId",      "type": "string"},
+    {"name": "profileId",    "type": "string"},
+    {"name": "eventType",    "type": {
+      "type": "enum",
+      "name": "EventType",
+      "symbols": ["CREATED", "UPDATED", "DELETED", "MERGED"],
+      "default": "UPDATED"
+    }},
+    {"name": "timestamp",    "type": "long",   "logicalType": "timestamp-millis"},
+    {"name": "firstName",    "type": "string"},
+    {"name": "lastName",     "type": "string"},
+    {"name": "email",        "type": "string"},
+    {"name": "schemaVersion","type": "int",    "default": 2},
+    {"name": "phoneNumber",  "type": ["null", "string"], "default": null},
+    {"name": "department",   "type": ["null", "string"], "default": null},
+    {"name": "mergedFromId", "type": ["null", "string"], "default": null, "doc": "populated only when eventType=MERGED — the source profileId absorbed into this one"},
+    {"name": "metadata",     "type": ["null", {"type": "map", "values": "string"}], "default": null}
+  ]
+}
