@@ -42,7 +42,7 @@ public class ProfileController {
         producer.send(doc.getId(), EventType.CREATED,
                 producer.buildEvent(doc.getId(), EventType.CREATED,
                         req.firstName(), req.lastName(), req.email(),
-                        req.phoneNumber(), req.department()));
+                        req.phoneNumber(), req.department(), req.metadata()));
         return doc;
     }
 
@@ -59,7 +59,7 @@ public class ProfileController {
             producer.send(id, EventType.UPDATED,
                     producer.buildEvent(id, EventType.UPDATED,
                             req.firstName(), req.lastName(), req.email(),
-                            req.phoneNumber(), req.department()));
+                            req.phoneNumber(), req.department(), req.metadata()));
             return ResponseEntity.ok(doc);
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -71,7 +71,7 @@ public class ProfileController {
             producer.send(id, EventType.DELETED,
                     producer.buildEvent(id, EventType.DELETED,
                             doc.getFirstName(), doc.getLastName(), doc.getEmail(),
-                            doc.getPhoneNumber(), doc.getDepartment()));
+                            doc.getPhoneNumber(), doc.getDepartment(), null));
             return ResponseEntity.noContent().<Void>build();
         }).orElse(ResponseEntity.notFound().build());
     }

@@ -5,5 +5,6 @@ public record ProfileRequest(
         String lastName,
         String email,
         String phoneNumber,
-        String department
+        String department,
+        java.util.Map<String, String> metadata
 ) {}

@@ -37,7 +37,7 @@ public class SimulationController {
             String id = UUID.randomUUID().toString();
             producer.send(id, EventType.CREATED,
                     producer.buildEvent(id, EventType.CREATED,
-                            "Burst", "User-" + i, "burst" + i + "@example.com", null, null));
+                            "Burst", "User-" + i, "burst" + i + "@example.com", null, null, null));
         }
         return Map.of("status", "burst sent", "count", count,
                 "observe", "watch consumer lag in Kafka UI at http://localhost:8090");

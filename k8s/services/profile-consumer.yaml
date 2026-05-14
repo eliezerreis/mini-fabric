@@ -8,7 +8,12 @@ metadata:
     # Scale with: kubectl scale deployment profile-consumer --replicas=3 -n my-fabric
     # This triggers a Kafka rebalance — watch logs for REVOKED/ASSIGNED messages
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # never kill old pod before new one is ready
+      maxSurge: 1         # one extra pod during rollout
   selector:
     matchLabels:
       app: profile-consumer
@@ -29,6 +34,6 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health
-              port: 8081
+              port: 8085
             initialDelaySeconds: 20
             periodSeconds: 10

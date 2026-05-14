@@ -23,6 +23,12 @@ public class ProfileEventProcessor {
     }
 
     public void process(ProfileEvent event) {
+        if (event.getSchemaVersion() == -1) {
+            throw new RuntimeException(
+                "Poison message detected: profileId=" + event.getProfileId()
+                + " — schemaVersion=-1 is a poison indicator. Will retry then route to DLQ.");
+        }
+
         switch (event.getEventType()) {
             case CREATED, UPDATED, MERGED -> upsert(event);
             case DELETED -> {

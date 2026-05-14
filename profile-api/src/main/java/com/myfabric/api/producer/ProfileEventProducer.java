@@ -54,7 +54,8 @@ public class ProfileEventProducer {
 
     public ProfileEvent buildEvent(String profileId, EventType type,
                                    String firstName, String lastName, String email,
-                                   String phoneNumber, String department) {
+                                   String phoneNumber, String department,
+                                   java.util.Map<String, String> metadata) {
         return ProfileEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setProfileId(profileId)
@@ -67,7 +68,7 @@ public class ProfileEventProducer {
                 .setPhoneNumber(phoneNumber)
                 .setDepartment(department)
                 .setMergedFromId(null)
-                .setMetadata(null)
+                .setMetadata(metadata)
                 .build();
     }
 
