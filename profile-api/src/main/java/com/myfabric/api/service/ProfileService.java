@@ -21,6 +21,7 @@ public class ProfileService {
     }
 
     public Profile create(ProfileDTO dto) {
+        //TODO: Dual write problem, will be fixed later, probably with outbox pattern
         var saved = repository.save(dto.toProfile());
         producer.send(saved.id(), EventType.CREATED,
                 producer.buildEvent(saved.id(), EventType.CREATED,
@@ -30,6 +31,7 @@ public class ProfileService {
     }
 
     public Optional<Profile> update(String id, ProfileDTO dto) {
+        //TODO: Dual write problem
         return repository.findById(id).map(existing -> {
             var saved = repository.save(existing.withUpdates(dto));
             producer.send(id, EventType.UPDATED,
@@ -41,6 +43,7 @@ public class ProfileService {
     }
 
     public boolean delete(String id) {
+        //TODO: Dual write problem
         return repository.findById(id).map(profile -> {
             repository.deleteById(id);
             producer.send(id, EventType.DELETED,

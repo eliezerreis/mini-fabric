@@ -2,6 +2,7 @@ package com.myfabric.api.controller;
 
 import com.myfabric.api.producer.ProfileEventProducer;
 import com.myfabric.events.EventType;
+import com.myfabric.events.ProfileEvent;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -47,7 +48,7 @@ public class SimulationController {
     public Map<String, String> simulateMerge(
             @RequestParam String targetProfileId,
             @RequestParam String sourceProfileId) {
-        var event = com.myfabric.events.ProfileEvent.newBuilder()
+        var event = ProfileEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setProfileId(targetProfileId)
                 .setEventType(EventType.MERGED)

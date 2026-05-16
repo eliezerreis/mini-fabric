@@ -3,21 +3,20 @@ package com.myfabric.api.producer;
 import com.myfabric.events.EventType;
 import com.myfabric.events.ProfileEvent;
 import org.apache.avro.specific.SpecificRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+@Slf4j
 @Component
 public class ProfileEventProducer {
-
-    private static final Logger log = LoggerFactory.getLogger(ProfileEventProducer.class);
 
     private final KafkaTemplate<String, SpecificRecord> kafkaTemplate;
 
@@ -55,7 +54,7 @@ public class ProfileEventProducer {
     public ProfileEvent buildEvent(String profileId, EventType type,
                                    String firstName, String lastName, String email,
                                    String phoneNumber, String department,
-                                   java.util.Map<String, String> metadata) {
+                                   Map<String, String> metadata) {
         return ProfileEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setProfileId(profileId)
