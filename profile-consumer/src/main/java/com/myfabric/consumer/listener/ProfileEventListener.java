@@ -4,8 +4,7 @@ import com.myfabric.consumer.processor.ProfileEventProcessor;
 import com.myfabric.events.ProfileEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.BackOff;
 import org.springframework.kafka.annotation.DltHandler;
@@ -22,10 +21,9 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
+@Slf4j
 @Component
 public class ProfileEventListener implements ConsumerSeekAware {
-
-    private static final Logger log = LoggerFactory.getLogger(ProfileEventListener.class);
 
     private final ProfileEventProcessor processor;
 

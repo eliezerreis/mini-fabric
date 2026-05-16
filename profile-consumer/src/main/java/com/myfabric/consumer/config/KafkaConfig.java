@@ -47,22 +47,27 @@ public class KafkaConfig {
     @Value("${fabric.consumer.concurrency:3}")
     private int concurrency;
 
+    private Map<String, Object> commonProps() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put("security.protocol", securityProtocol);
+        props.put("sasl.mechanism", saslMechanism);
+        props.put("sasl.jaas.config", saslJaasConfig);
+        props.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        return props;
+    }
+
     // ── Consumer ────────────────────────────────────────────────
 
     @Bean
     public ConsumerFactory<String, Object> consumerFactory() {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        Map<String, Object> props = commonProps();
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        props.put("security.protocol", securityProtocol);
-        props.put("sasl.mechanism", saslMechanism);
-        props.put("sasl.jaas.config", saslJaasConfig);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, KafkaAvroDeserializer.class);
-        props.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
         props.put(KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, true);
         return new DefaultKafkaConsumerFactory<>(props);
     }
@@ -80,14 +85,9 @@ public class KafkaConfig {
 
     @Bean
     public ProducerFactory<String, Object> retryProducerFactory() {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        Map<String, Object> props = commonProps();
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaAvroSerializer.class);
-        props.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
-        props.put("security.protocol", securityProtocol);
-        props.put("sasl.mechanism", saslMechanism);
-        props.put("sasl.jaas.config", saslJaasConfig);
         return new DefaultKafkaProducerFactory<>(props);
     }
 
