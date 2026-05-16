@@ -24,6 +24,15 @@ public class KafkaProducerConfig {
     @Value("${spring.kafka.properties.schema.registry.url}")
     private String schemaRegistryUrl;
 
+    @Value("${spring.kafka.properties.security.protocol:SASL_PLAINTEXT}")
+    private String securityProtocol;
+
+    @Value("${spring.kafka.properties.sasl.mechanism:PLAIN}")
+    private String saslMechanism;
+
+    @Value("${spring.kafka.properties.sasl.jaas.config}")
+    private String saslJaasConfig;
+
     @Bean
     public ProducerFactory<String, SpecificRecord> producerFactory() {
         Map<String, Object> props = new HashMap<>();
@@ -31,6 +40,9 @@ public class KafkaProducerConfig {
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaAvroSerializer.class);
         props.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        props.put("security.protocol", securityProtocol);
+        props.put("sasl.mechanism", saslMechanism);
+        props.put("sasl.jaas.config", saslJaasConfig);
         // exactly-once ordering within a partition
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);

@@ -31,25 +31,31 @@ volumes:
 services:
 
   # ── Kafka (KRaft — combined broker + controller, no ZooKeeper) ─
+  #
+  #  Security model:
+  #    EXTERNAL  (9092) — SASL_PLAINTEXT  host-side tools (kafka-acls, kafka-console-*)
+  #    INTERNAL  (9093) — SASL_PLAINTEXT  container-to-container app traffic
+  #    CONTROLLER(29093)— PLAINTEXT       KRaft controller, never exposed
+  #
+  #  Users:  admin (super-user) | profileapi | profileconsumer | dlqconsumer
+  #  ACLs:   granted at startup by kafka-init (see below)
   kafka:
     image: confluentinc/cp-kafka:8.2.0
     hostname: kafka
     container_name: fabric-kafka
     networks: [fabric-net]
     ports:
-      - "9092:9092"    # external — used by host-side tools and apps
-      - "9093:9093"    # internal — container-to-container
+      - "9092:9092"    # external — SASL_PLAINTEXT
+      - "9093:9093"    # internal — SASL_PLAINTEXT
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
-      # Three listener names: EXTERNAL (host), INTERNAL (containers), CONTROLLER (KRaft)
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:SASL_PLAINTEXT,INTERNAL:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_LISTENERS: EXTERNAL://0.0.0.0:9092,INTERNAL://0.0.0.0:9093,CONTROLLER://0.0.0.0:29093
       KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      # Stable cluster ID — must be base64-encoded UUID (22 chars)
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -57,10 +63,41 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: 24
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 3000
+      # ── SASL ──────────────────────────────────────────────────────
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      # Broker's own credential (used for inter-broker auth)
+      KAFKA_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin"
+        password="admin-secret";
+      # Valid clients on EXTERNAL listener
+      KAFKA_LISTENER_NAME_EXTERNAL_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin"
+        password="admin-secret"
+        user_admin="admin-secret"
+        user_profileapi="api-secret"
+        user_profileconsumer="consumer-secret"
+        user_dlqconsumer="dlq-secret";
+      # Valid clients on INTERNAL listener
+      KAFKA_LISTENER_NAME_INTERNAL_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin"
+        password="admin-secret"
+        user_admin="admin-secret"
+        user_profileapi="api-secret"
+        user_profileconsumer="consumer-secret"
+        user_dlqconsumer="dlq-secret";
+      # ── ACL Authorizer ────────────────────────────────────────────
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      # ANONYMOUS needed because the CONTROLLER listener is PLAINTEXT (KRaft-internal,
+      # never exposed). Broker-to-controller registration arrives as User:ANONYMOUS.
+      KAFKA_SUPER_USERS: User:admin;User:ANONYMOUS
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      test: ["CMD-SHELL", "echo 'security.protocol=SASL_PLAINTEXT' > /tmp/hc.props && echo 'sasl.mechanism=PLAIN' >> /tmp/hc.props && echo 'sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"admin-secret\";' >> /tmp/hc.props && kafka-topics --bootstrap-server localhost:9092 --command-config /tmp/hc.props --list"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -78,10 +115,15 @@ services:
       - "8081:8081"
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      # KRaft: point directly at the broker; no ZooKeeper URL needed
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9093
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
       SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: PLAIN
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin"
+        password="admin-secret";
 
   # ── Topic initialiser (runs once, exits) ──────────────────────
   kafka-init:
@@ -94,19 +136,51 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        echo "Creating topics..."
-        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        printf 'security.protocol=SASL_PLAINTEXT\nsasl.mechanism=PLAIN\nsasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";\n' > /tmp/admin.properties
+
+        echo "==> Creating topics..."
+        kafka-topics --bootstrap-server kafka:9093 --command-config /tmp/admin.properties \
+          --create --if-not-exists \
           --topic profile.events --partitions 6 --replication-factor 1 \
           --config retention.ms=86400000
-        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        kafka-topics --bootstrap-server kafka:9093 --command-config /tmp/admin.properties \
+          --create --if-not-exists \
           --topic profile.events-retry-0 --partitions 6 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        kafka-topics --bootstrap-server kafka:9093 --command-config /tmp/admin.properties \
+          --create --if-not-exists \
           --topic profile.events-retry-1 --partitions 6 --replication-factor 1
-        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        kafka-topics --bootstrap-server kafka:9093 --command-config /tmp/admin.properties \
+          --create --if-not-exists \
           --topic profile.events.dlq --partitions 3 --replication-factor 1 \
           --config retention.ms=604800000
-        echo "Topics created:"
-        kafka-topics --bootstrap-server kafka:9093 --list
+        echo "Topics:"
+        kafka-topics --bootstrap-server kafka:9093 --command-config /tmp/admin.properties --list
+
+        echo "==> Granting ACLs..."
+        BS="--bootstrap-server kafka:9093 --command-config /tmp/admin.properties"
+
+        # profile-api: produce to profile.events
+        kafka-acls $$BS --add --allow-principal User:profileapi \
+          --producer --topic profile.events
+
+        # profile-consumer: consume from all topics it reads
+        for topic in profile.events profile.events-retry-0 profile.events-retry-1 profile.events.dlq; do
+          kafka-acls $$BS --add --allow-principal User:profileconsumer \
+            --consumer --topic "$$topic" --group profile-consumer-group
+        done
+
+        # profile-consumer: also needs to WRITE to retry and DLQ topics
+        for topic in profile.events-retry-0 profile.events-retry-1 profile.events.dlq; do
+          kafka-acls $$BS --add --allow-principal User:profileconsumer \
+            --operation Write --topic "$$topic"
+        done
+
+        # dlq-consumer: consume from DLQ
+        kafka-acls $$BS --add --allow-principal User:dlqconsumer \
+          --consumer --topic profile.events.dlq --group dlq-consumer-group
+
+        echo "==> Current ACLs:"
+        kafka-acls $$BS --list
 
   # ── Kafka UI ──────────────────────────────────────────────────
   kafka-ui:
@@ -122,6 +196,12 @@ services:
       KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
       KAFKA_CLUSTERS_0_METRICS_PORT: 9997
       DYNAMIC_CONFIG_ENABLED: "true"
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin"
+        password="admin-secret";
 
   # ── MongoDB ───────────────────────────────────────────────────
   mongodb:
@@ -174,6 +254,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9093
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       MONGODB_URI: mongodb://mongodb:27017/fabric
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_USERNAME: profileapi
+      KAFKA_PASSWORD: api-secret
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 15s
@@ -199,6 +282,9 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       MONGODB_URI: mongodb://mongodb:27017/fabric
       CONSUMER_GROUP_ID: profile-consumer-group
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_USERNAME: profileconsumer
+      KAFKA_PASSWORD: consumer-secret
       # Uncomment to simulate consumer lag:
       # SIMULATE_SLOW_MS: 500
 
@@ -219,6 +305,9 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       MONGODB_URI: mongodb://mongodb:27017/fabric
       CONSUMER_GROUP_ID: dlq-consumer-group
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_USERNAME: dlqconsumer
+      KAFKA_PASSWORD: dlq-secret
 
   # ── schema-migrator ───────────────────────────────────────────
   schema-migrator:
