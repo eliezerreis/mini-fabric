@@ -111,6 +111,73 @@ bash scripts/05-schema-evolution-demo.sh
 # then sends a v2-only MERGED event — v1 consumers read it as UPDATED
 ```
 
+## Known issues & solutions
+
+### 1. Consumer Lag
+Consumers can't keep up with producer throughput.
+
+| Solution | Side effects |
+|---|---|
+| Increase `concurrency` (more threads) | Limited by number of partitions — can't have more consumers than partitions |
+| Increase partitions | Requires rebalance, ordering guarantee breaks across new partition layout |
+| Optimize consumer processing (batch, async DB writes) | More complex code, harder to reason about failures |
+| Scale horizontally (more consumer instances) | Same partition limit applies |
+
+---
+
+### 2. Ordering
+Events for the same profile must be processed in order (CREATED → UPDATED → DELETED).
+
+| Solution | Side effects |
+|---|---|
+| **Key-based routing** (current — `profileId` as key) | Ordering guaranteed per partition only |
+| `max.in.flight.requests.per.connection=1` + `enable.idempotence=true` (already set) | Slightly reduces throughput |
+| Forcing a specific partition | Breaks key-based routing, manual management burden |
+
+> **Risk**: increasing partitions on an existing topic may reroute existing keys to different partitions, mixing old and new events out of order.
+
+---
+
+### 3. Poison Messages
+A message that can't be deserialized or processed, causing the consumer to crash in a loop.
+
+| Solution | Side effects |
+|---|---|
+| **`ErrorHandlingDeserializer`** (current) | Wraps deserialization errors, passes bad message downstream instead of crashing |
+| **`@RetryableTopic`** (current) | Retries N times then routes to DLQ automatically |
+| Dead-letter manually in catch block | More control but boilerplate, easy to miss edge cases |
+| Skip and log | Simplest, but silent data loss |
+
+> **Current gap**: poison detection relies on `schemaVersion == -1` check in `ProfileEventProcessor` — only catches deliberately injected poison, not all malformed messages.
+
+---
+
+### 4. Rebalance
+Partition reassignment triggered by a consumer joining or leaving the group, causing a processing pause.
+
+| Solution | Side effects |
+|---|---|
+| **`ConsumerSeekAware`** (current) | Logs assigned/revoked partitions, allows custom seek on rebalance |
+| Cooperative sticky rebalance (`CooperativeStickyAssignor`) | Minimizes partitions moved, reduces pause window — requires all consumers in group to use it |
+| Static membership (`group.instance.id`) | Consumer keeps partitions across restarts without rebalance, but stale members hold partitions until session timeout |
+| Minimize processing time per message | Reduces chance of session timeout triggering rebalance |
+
+---
+
+### 5. Schema Evolution
+Producers and consumers may run different schema versions simultaneously during rolling deploys.
+
+| Solution | Side effects |
+|---|---|
+| **Backward compatibility** (current — new fields have defaults) | Old consumers read new messages safely, but can't access new fields |
+| Forward compatibility | New consumers read old messages, producers must never remove fields |
+| Full compatibility | Both directions safe, most restrictive — can only add optional fields |
+| Schema Registry enforcement | Rejects incompatible schemas at registration time before reaching the topic |
+
+> **Current setup**: v1 consumers read v2 messages safely because all new fields have defaults. `MERGED` enum defaults to `UPDATED` for v1 consumers — processed silently as an update.
+
+---
+
 ## Project structure
 
 ```
