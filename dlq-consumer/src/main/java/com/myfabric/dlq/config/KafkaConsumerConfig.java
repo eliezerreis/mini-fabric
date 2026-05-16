@@ -35,7 +35,7 @@ public class KafkaConsumerConfig {
     private String saslJaasConfig;
 
     @Bean
-    public ConsumerFactory<String, Object> dlqConsumerFactory() {
+    public ConsumerFactory<String, Object> consumerFactory() {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -53,9 +53,9 @@ public class KafkaConsumerConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, Object> dlqKafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory() {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, Object>();
-        factory.setConsumerFactory(dlqConsumerFactory());
+        factory.setConsumerFactory(consumerFactory());
         factory.setConcurrency(1);
         return factory;
     }

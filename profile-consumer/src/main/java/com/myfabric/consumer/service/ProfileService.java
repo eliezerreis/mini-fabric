@@ -21,20 +21,20 @@ public class ProfileService {
     }
 
     public void upsert(ProfileEvent event) {
-        String profileId = event.getProfileId().toString();
+        String profileId = event.getProfileId();
 
         Map<String, String> meta = event.getMetadata() == null ? null :
                 event.getMetadata().entrySet().stream()
-                        .collect(Collectors.toMap(e -> e.getKey().toString(), e -> e.getValue().toString()));
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         var profile = new Profile(
                 profileId,
-                event.getFirstName().toString(),
-                event.getLastName().toString(),
-                event.getEmail().toString(),
-                event.getPhoneNumber() != null ? event.getPhoneNumber().toString() : null,
-                event.getDepartment() != null ? event.getDepartment().toString() : null,
-                event.getMergedFromId() != null ? event.getMergedFromId().toString() : null,
+                event.getFirstName(),
+                event.getLastName(),
+                event.getEmail(),
+                event.getPhoneNumber(),
+                event.getDepartment(),
+                event.getMergedFromId(),
                 meta,
                 Instant.now(),
                 event.getSchemaVersion(),

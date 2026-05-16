@@ -1,17 +1,12 @@
 package com.myfabric.dlq.listener;
 
-import com.myfabric.dlq.document.FailedEventDocument;
-import com.myfabric.dlq.repository.FailedEventRepository;
+import com.myfabric.dlq.service.FailedEventService;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
-
-import java.time.Instant;
-import java.util.UUID;
 
 /**
  * Reads all DLQ topics matching profile.events*.dlq.
@@ -21,21 +16,19 @@ import java.util.UUID;
  *   POST /simulate/poison  →  watch this listener log a FAILED_EVENT
  *   GET  /dlq/events       →  (via DlqController) list all failed events
  */
+@Slf4j
 @Component
 public class DlqEventListener {
 
-    private static final Logger log = LoggerFactory.getLogger(DlqEventListener.class);
+    private final FailedEventService failedEventService;
 
-    private final FailedEventRepository repository;
-
-    public DlqEventListener(FailedEventRepository repository) {
-        this.repository = repository;
+    public DlqEventListener(FailedEventService failedEventService) {
+        this.failedEventService = failedEventService;
     }
 
     @KafkaListener(
             topicPattern = "profile\\.events.*\\.dlq",
-            groupId = "${spring.kafka.consumer.group-id}",
-            containerFactory = "dlqKafkaListenerContainerFactory"
+            groupId = "${spring.kafka.consumer.group-id}"
     )
     public void onDlqEvent(
             ConsumerRecord<String, ?> record,
@@ -48,19 +41,8 @@ public class DlqEventListener {
         log.error("DLQ event received: topic={} partition={} offset={} profileId={} error={}",
                 topic, partition, offset, record.key(), exceptionMessage);
 
-        var doc = new FailedEventDocument();
-        doc.setId(UUID.randomUUID().toString());
-        doc.setProfileId(record.key());
-        doc.setTopic(topic);
-        doc.setPartition(partition);
-        doc.setOffset(offset);
-        doc.setExceptionClass(exceptionClass);
-        doc.setExceptionMessage(exceptionMessage);
-        doc.setRawPayload(record.value() != null ? record.value().toString() : "<null>");
-        doc.setReceivedAt(Instant.now());
-        doc.setStatus("PENDING_REVIEW");
-
-        repository.save(doc);
-        log.info("Persisted failed event to MongoDB id={}", doc.getId());
+        failedEventService.persist(record.key(), topic, partition, offset,
+                exceptionClass, exceptionMessage,
+                record.value() != null ? record.value().toString() : "<null>");
     }
 }
